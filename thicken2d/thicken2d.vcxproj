@@ -145,7 +145,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="edgememo.cpp" />
     <ClCompile Include="thicken2d.cpp" />
+    <ClCompile Include="vertexmemo.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="edgememo.h" />
+    <ClInclude Include="vertexmemo.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
