@@ -55,7 +55,8 @@ typedef boost::optional<Tree::Intersection_and_primitive_id<Ray>::Type> Ray_inte
 typedef boost::optional<Tree::Intersection_and_primitive_id<Segment>::Type> Segment_intersection;
 
 // Constants
-std::string FILENAME = "data/example.dat";
+std::string FILENAME = "../data/example/example.dat";
+std::string IDENTIFIER = "test";
 
 size_t num_samples = 10;
 double cone_half_angle = CGAL_PI / 12.0;
@@ -72,7 +73,7 @@ double VERTEX_MASS = 1.0;
 double MASS_INV = 1.0 / VERTEX_MASS;
 
 double TIME_STEP = 1.0;
-double TOTAL_TIME = 3.0;
+double TOTAL_TIME = 50.0;
 size_t STEPS = (size_t)std::ceil(TOTAL_TIME / TIME_STEP);
 
 // Global Variables
@@ -82,8 +83,8 @@ std::vector<std::pair<double, double>> angles;
 std::vector<double> sdf_vec;
 std::vector<VertexMemo> vmemo_vec;
 std::vector<EdgeMemo> ememo_vec;
-
-
+arma::vec max_change_vec(STEPS);
+size_t nMove;
 
 // FILE FORMAT:
 // #number of polygons with holes <num_poly>
@@ -221,23 +222,15 @@ bool read(std::string filename, Pwh_list& result)
 	return true;
 }
 
-// write normals to a file
-void writeNormals(std::string filename)
+// write SDF values to a file
+void writeSDF(std::string filename)
 {
 	std::ofstream ofile(filename);
-	for (std::vector<Vector_3>::iterator it = normal_vec.begin(); it != normal_vec.end(); it++)
-		ofile << *it << "\n";
+	std::ostream_iterator<double> output_iterator(ofile, "\n");
+	std::copy(sdf_vec.begin(), sdf_vec.end(), output_iterator);
 	ofile.close();
 }
 
-// write angles to a file
-void writeAngles(std::string filename)
-{
-	std::ofstream ofile(filename);
-	for (std::vector<std::pair<double, double>>::iterator it = angles.begin(); it != angles.end(); it++)
-		ofile << it->first << " " << it->second << "\n";
-	ofile.close();
-}
 
 // get vertices as vector of Point_3 for a simple polygon
 void getVertexVector(const Polygon& pg)
@@ -352,15 +345,52 @@ Pwh resample(const Pwh& pwh, double delta)
 }
 
 // get vertex normals of a simple polygon
+void getNormals(const Polygon& pg, bool isHole = false)
+{
+	Vector_2 normal;
+	Polygon::Vertex_iterator vi = pg.vertices_begin();
+	Polygon::Edge_const_iterator ei = pg.edges_begin();
+
+	CGAL::Orientation o = pg.orientation();
+
+	normal = ((pg.edges_end() - 1)->to_vector() + ei->to_vector()).perpendicular(o);
+	if (!isHole)
+		normal = -normal;
+	normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
+	normal_vec.push_back(Vector_3(normal.x(), normal.y(), 0.0));
+	vi++; ei++;
+
+	for (; vi != pg.vertices_end(); vi++, ei++)
+	{
+		normal = ((ei - 1)->to_vector() + ei->to_vector()).perpendicular(o);
+		if (!isHole)
+			normal = -normal;
+		normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
+		normal_vec.push_back(Vector_3(normal.x(), normal.y(), 0.0));
+	}
+}
+
+// get vertex normals of a polygon with holes
+void getNormals(const Pwh& pwh)
+{
+	normal_vec.clear();
+	getNormals(pwh.outer_boundary());
+	for (Pwh::Hole_const_iterator hi = pwh.holes_begin(); hi != pwh.holes_end(); hi++)
+		getNormals(*hi, true);
+}
+
+// get vertex normals of a simple polygon
 void getNormalsAndAngles(const Polygon& pg, bool isHole = false)
 {
 	Vector_2 normal, edge1, edge2;
 	Polygon::Vertex_iterator vi = pg.vertices_begin();
 	Polygon::Edge_const_iterator ei = pg.edges_begin();
 
+	CGAL::Orientation o = pg.orientation();
+
 	edge1 = (pg.edges_end() - 1)->to_vector();
 	edge2 = ei->to_vector();
-	normal = (edge1 + edge2).perpendicular(pg.orientation());
+	normal = (edge1 + edge2).perpendicular(o);
 	if (!isHole)
 		normal = -normal;
 	normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
@@ -372,7 +402,7 @@ void getNormalsAndAngles(const Polygon& pg, bool isHole = false)
 	{
 		edge1 = (ei - 1)->to_vector();
 		edge2 = ei->to_vector();
-		normal = (edge1 + edge2).perpendicular(pg.orientation());
+		normal = (edge1 + edge2).perpendicular(o);
 		if (!isHole)
 			normal = -normal;
 		normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
@@ -494,9 +524,6 @@ void computeSDF(const Pwh& pwh, bool SDFexists = false)
 	getVertexVector(pwh);
 	getNormalsAndAngles(pwh);
 
-	writeNormals("data/normals.dat");
-	writeAngles("data/angles.dat");
-
 	sdf_vec.clear();
 
 	// use pre-existing sdf values if already computed before
@@ -539,14 +566,8 @@ void computeSDF(const Pwh& pwh, bool SDFexists = false)
 			sdf_vec.push_back(niceAverage(dists));
 		}
 
-		if (SDFexists) // TODO: remove this if statement
-		{
-			// write sdf values to a file
-			std::ofstream ofile(sdf_file);
-			std::ostream_iterator<double> output_iterator(ofile, "\n");
-			std::copy(sdf_vec.begin(), sdf_vec.end(), output_iterator);
-			ofile.close();
-		}
+		if (SDFexists) // TODO: what's the purpose of this if statement?
+			writeSDF(sdf_file);
 	}
 }
 
@@ -574,10 +595,20 @@ void intersect(Polygon& pg, Point_2& source, Vector_2& dir)
 	}
 }
 
+// TODO: is pgId in vertex memo required?
 
+// reset pwh from vmemo_vec
+void createPwhFromVmemo(Pwh &pwh)
+{
+	size_t id = 0;
+	Polygon::Vertex_iterator vi;
+	for (vi = pwh.outer_boundary().vertices_begin(); vi != pwh.outer_boundary().vertices_end(); vi++)
+		pwh.outer_boundary().set(vi, vmemo_vec[id++].get_vertex());
 
-
-
+	for (Pwh::Hole_iterator hi = pwh.holes_begin(); hi != pwh.holes_end(); hi++)
+		for (vi = hi->vertices_begin(); vi != hi->vertices_end(); vi++)
+			hi->set(vi, vmemo_vec[id++].get_vertex());
+}
 
 void setMovable(
 	const Polygon& pg,
@@ -615,7 +646,7 @@ void populate_memos(
 )
 {
 	size_t loc = startIdx;
-	// loop over each vertex to comoute vertex sdf
+	// loop over each vertex to compute vertex sdf
 	for (Polygon::Vertex_const_iterator vi = pg.vertices_begin(); vi != pg.vertices_end(); ++vi, ++loc)
 	{
 		VertexMemo vmemo(*vi, loc, pgId);
@@ -646,15 +677,14 @@ void populate_memos(
 
 // compute element forces and Jacobians on vertex elements
 size_t populate_memos(
-	const Pwh& pwh,
-	bool recomputeSDF = false
+	Pwh& pwh,
+	bool SDFexists = false
 )
 {
 	vmemo_vec.clear();
 	ememo_vec.clear();
 
-	if (recomputeSDF || sdf_vec.size() == 0)
-		computeSDF(pwh, !recomputeSDF);
+	computeSDF(pwh, SDFexists);
 
 	size_t startIdx = 0, pgId = 0;
 	populate_memos(pwh.outer_boundary(), startIdx, pgId);
@@ -673,6 +703,8 @@ size_t populate_memos(
 		else
 			it->index = 0;
 	}
+
+	createPwhFromVmemo(pwh);
 
 	return movable;
 }
@@ -820,61 +852,6 @@ void march_one_time_step(
 	delta_POS = TIME_STEP*(VELOCITY + delta_VEL);
 }
 
-// create a new Pwh from vmemo_vec
-Pwh createPwhFromVmemo(Pwh &pwh)
-{
-	pwh.clear();
-	pwh.outer_boundary();
-	Polygon pg;
-	size_t id = 0;
-	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it != vmemo_vec.end(); it++)
-	{
-		if (it->pgId != id)
-		{
-			if (id == 0)
-				pwh = Pwh(Polygon(pg));
-			else
-				pwh.add_hole(Polygon(pg));
-			id++;
-			pg.clear();
-		}
-		pg.push_back(it->get_vertex());
-	}
-	if (id == 0)
-		pwh = Pwh(Polygon(pg));
-	else
-		pwh.add_hole(Polygon(pg));
-	return pwh;
-}
-
-// create a new Pwh from vmemo_vec
-Pwh createPwhFromVmemo()
-{
-	Pwh pwh;
-	Polygon pg;
-	size_t id = 0;
-	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it != vmemo_vec.end(); it++)
-	{
-		if (it->pgId != id)
-		{
-			if (id == 0)
-				pwh = Pwh(Polygon(pg));
-			else
-				pwh.add_hole(Polygon(pg));
-			id++;
-			pg.clear();
-		}
-		pg.push_back(it->get_vertex());
-	}
-	if (id == 0)
-		pwh = Pwh(Polygon(pg));
-	else
-		pwh.add_hole(Polygon(pg));
-	return pwh;
-}
-
-
-
 // update the positions, velocities, and memos
 void update(
 	const arma::vec& delta_POS,
@@ -904,7 +881,7 @@ void update(
 	// TODO: decide whether to update normals and sdf_force every time step or not
 	// updating normals
 	getVertexVector(pwh);
-	getNormalsAndAngles(pwh);
+	getNormals(pwh);
 
 	for (size_t i = 0; i < vmemo_vec.size(); i++)
 	{
@@ -955,8 +932,107 @@ double march_and_update(
 
 // TODO: set parameters for resolution and resampling
 
+// creates an output file with all the necessary parameters and output values
+void generateOutput(
+	const std::string filename,
+	const Pwh& pwh
+)
+{
+	std::ofstream ofile(filename);
+	ofile << "Input File:\n" << FILENAME << "\n";
+	ofile << "Output Identifier:\n" << IDENTIFIER << "\n";
+	ofile << "Thickness Threshold:\n" << T1 << "\n";
+	ofile << "Force Constant SDF:\n" << K_SDF << "\n";
+	ofile << "Force Constant Spring:\n" << K_S << "\n";
+	ofile << "Force Constant Damper:\n" << K_D << "\n";
+	ofile << "Vertex Mass:\n" << VERTEX_MASS << "\n";
+	ofile << "Time Step:\n" << TIME_STEP << "\n";
+	ofile << "Total Time:\n" << TOTAL_TIME << "\n";
+	ofile << "Steps:\n" << STEPS << "\n";
+	ofile << "Number of Movable Vertices:\n" << nMove << "\n";
+	ofile << "Total Number of Vertices:\n" << vertex_vec.size() << "\n";
+	ofile << "SDF Values:\n";
+	for (std::vector<double>::iterator it = sdf_vec.begin(); it != sdf_vec.end(); it++)
+		ofile << *it << "\n";
+	ofile << "Vertex Movable Index:\n";
+	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it!= vmemo_vec.end(); it++)
+		ofile << it->index << "\n";
+	ofile << "Normal Vectors:\n";
+	for (std::vector<Vector_3>::iterator it = normal_vec.begin(); it != normal_vec.end(); it++)
+		ofile << it->x() << " " << it->y() << "\n";
+	ofile << "Angles:\n";
+	for (std::vector<std::pair<double, double>>::iterator it = angles.begin(); it != angles.end(); it++)
+		ofile << it->first << " " << it->second << "\n";
+	ofile << "Max Change:\n";
+	ofile << max_change_vec;
+	ofile.close();
+}
+
+// print usage
+void print_usage()
+{
+	std::cout << std::endl;
+	std::cout << "USAGE:" << std::endl;
+	std::cout << "\tthicken2d.exe" << std::endl;
+	std::cout << "\tthicken2d.exe" << " <flag1> <value1> <flag2> <value2> ..." << std::endl;
+	std::cout << std::endl;
+	std::cout << "FLAGS:" << std::endl;
+	std::cout << "\t-f:\tinput file path FILENAME (default = \"data\\cactus\\cactus.off\")" << std::endl;
+	std::cout << "\t-id:\texperiment index IDENTIFIER (default = \"test\")" << std::endl;
+	std::cout << "\t-t1:\tthreshold T1 (default = 0.1)" << std::endl;
+	std::cout << "\t-ksdf:\tforce constant K_SDF (default = 8.0)" << std::endl;
+	std::cout << "\t-ks:\tspring constant K_S (default = 128.0)" << std::endl;
+	std::cout << "\t-kd:\tdamper constant K_D (default = 64.0)" << std::endl;
+	std::cout << "\t-vm:\tvertex mass VERTEX_MASS (default = 1.0)" << std::endl;
+	std::cout << "\t-ts:\tone time step TIME_STEP (default = 1.0)" << std::endl;
+	std::cout << "\t-t:\ttotal time TOTAL_TIME (default = 50.0)" << std::endl;
+	std::cout << "\t-h, -help:\tprint usage" << std::endl;
+	std::cout << std::endl;
+	std::cout << "Running using default settings..." << std::endl;
+	std::cout << std::endl;
+}
+
+
 int main(int argc, char *argv[])
 {
+	if (argc < 2)
+		print_usage();
+	else
+	{
+		int i = 1;
+		while (i < argc)
+		{
+			std::string flag(argv[i]);
+			if (flag == "-f")
+				FILENAME = argv[++i];
+			if (flag == "-id")
+				IDENTIFIER = argv[++i];
+			if (flag == "-t1")
+				T1 = std::atof(argv[++i]);
+			if (flag == "-ksdf")
+				K_SDF = std::atof(argv[++i]);
+			if (flag == "-ks")
+				K_S = std::atof(argv[++i]);
+			if (flag == "-kd")
+				K_D = std::atof(argv[++i]);
+			if (flag == "-vm")
+				VERTEX_MASS = std::atof(argv[++i]);
+			if (flag == "-ts")
+				TIME_STEP = std::atof(argv[++i]);
+			if (flag == "-t")
+				TOTAL_TIME = std::atof(argv[++i]);
+			if (flag == "-h" || flag == "-help")
+				print_usage();
+			++i;
+		}
+	}
+
+	MASS_INV = 1.0 / VERTEX_MASS;
+	STEPS = (size_t)std::ceil(TOTAL_TIME / TIME_STEP);
+
+	std::string pwhOutFile = FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + ".dat";
+	std::string outputFile = FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + ".out";
+
 	re.seed(0);
 
 	Pwh_list slice;
@@ -968,12 +1044,11 @@ int main(int argc, char *argv[])
 
 	// populate memos - compute and store normals, sdf, forces, and Jacobians
 	std::cout << "Populating memos..." << std::endl;
-	size_t nMove = populate_memos(pwh, true); // nMove is the number of movable vertices
+	nMove = populate_memos(pwh, true); // nMove is the number of movable vertices
 	std::cout << "Populating completed!\nNumber of movable vertices = " << nMove << std::endl;
 	std::cout << std::endl;
 
-	arma::vec max_change_vec(STEPS);
-	if (STEPS > 0)
+	if (STEPS > 0 && nMove > 0)
 	{
 		arma::vec FORCE;
 		arma::sp_mat JPOS;
@@ -991,26 +1066,25 @@ int main(int argc, char *argv[])
 		std::cout << "Performing numerical integration..." << std::endl;
 		for (size_t i = 0; i < STEPS; i++)
 		{
-			std::cout << "Time step " << i << std::endl;
 			max_change_vec[i] = march_and_update(nMove, pwh, FORCE, JPOS, JVEL, VELOCITY);
-			std::cout << "Max change = " << max_change_vec[i] << std::endl;
 		}
 		std::cout << "Integration completed!" << std::endl;
 		std::cout << std::endl;
 
 		// populate memos - compute and store normals, sdf, forces, and Jacobians
 		std::cout << "Populating memos..." << std::endl;
-		//nMove = populate_memos(pwh, false); // nMove is the number of movable vertices
+		nMove = populate_memos(pwh, false); // nMove is the number of movable vertices
 		std::cout << "Populating completed!\nNumber of movable vertices = " << nMove << std::endl;
 		std::cout << std::endl;
 	}
 
 	//intersect(pwh.outer_boundary(), Point_2(-3.75, -2.375), Vector_2(-1.0, 0.0));
 
-
-	std::ofstream outfile("data/exampleOut.dat");
+	std::ofstream outfile(pwhOutFile);
 	outfile << write(pwh);
 	outfile.close();
+
+	generateOutput(outputFile, pwh);
 
 	return 0;
 }
