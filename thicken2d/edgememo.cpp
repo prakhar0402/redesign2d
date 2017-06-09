@@ -35,7 +35,7 @@ void EdgeMemo::compute_force(const double& K_s, const double& K_d)
 	vec12 = pos2 - pos1; // vector pointing from pos1 to pos2
 
 	arma::mat mv12 = vec12 * arma::trans(vec12); // product of different elements of vec12
-
+	
 	double coef1 = K_s*(1 - initial_length / current_length);
 	double coef2 = K_s*initial_length / pow(current_length, 3);
 

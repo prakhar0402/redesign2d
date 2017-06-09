@@ -8,12 +8,25 @@ normals = -dlmread('../data/normals.dat');
 normal_length = 0.5;
 
 angles = dlmread('../data/angles.dat')*180/pi;
+%%%%
+inputFile = '../data/example/example';
+
+% pwh_list = readPWHList([inputFile, '.dat']);
+
+outputIdentifier = '0001';
+filename = [inputFile, '_', outputIdentifier];
 
 figure
 hold on
-plotPWHList(pwh_list)
-axis equal
+for i = 1 : 50
+    pause(1)
+    cla
+    pwh_list = readPWHList([filename, '.dat_', num2str(i)]);
+    plotPWHList(pwh_list)
+    axis equal
+end
 
+%%%%
 count = 0;
 for i = 1 : size(pwh_list.pwh{1}.outer_boundary, 1);
     

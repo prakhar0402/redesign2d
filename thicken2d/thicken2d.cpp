@@ -9,13 +9,13 @@
 #include <algorithm>
 #include <CGAL/Exact_predicates_exact_constructions_kernel.h>
 #include <CGAL/minkowski_sum_2.h>
+#include <CGAL/Polygon_set_2.h>
 #include <CGAL/Small_side_angle_bisector_decomposition_2.h>
 #include <CGAL/Boolean_set_operations_2.h>
 #include <CGAL/Polygon_2_algorithms.h>
 #include <CGAL/Bbox_2.h>
 #include <CGAL/Polygon_vertical_decomposition_2.h>
 #include <CGAL/connect_holes.h>
-
 
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/enum.h>
@@ -36,6 +36,7 @@ typedef Kernel::Point_2							Point_2;
 typedef CGAL::Polygon_2<Kernel>					Polygon;
 typedef CGAL::Polygon_with_holes_2<Kernel>		Pwh;
 typedef std::list<Pwh>							Pwh_list;
+typedef CGAL::Polygon_set_2<Kernel>				PgSet;
 
 typedef Kernel::Vector_2 Vector_2;
 typedef std::map<Polygon::Edge_const_iterator, Vector_2> Edge_vector_map;
@@ -54,20 +55,26 @@ typedef CGAL::AABB_tree<AABB_segment_traits> Tree;
 typedef boost::optional<Tree::Intersection_and_primitive_id<Ray>::Type> Ray_intersection;
 typedef boost::optional<Tree::Intersection_and_primitive_id<Segment>::Type> Segment_intersection;
 
-// Constants
+// CONSTANTS
 std::string FILENAME = "../data/example/example.dat";
 std::string IDENTIFIER = "test";
 
+// SDF parameters
 size_t num_samples = 10;
 double cone_half_angle = CGAL_PI / 12.0;
 std::uniform_real_distribution<double> unif(-cone_half_angle, cone_half_angle);
 std::default_random_engine re;
 
+// SuperLU settings
+arma::superlu_opts settings;
+//settings.symmetric = true;
+
 double T1 = 0.4;
 
-double K_SDF = 64.0;
-double K_S = 32.0;
-double K_D = 16.0;
+double K_S = 64.0;
+double K_D = 32.0;
+double K_SDF = K_S * T1;
+double K_C = K_S * T1 / 4; // length at which the edges are resampled
 
 double VERTEX_MASS = 1.0;
 double MASS_INV = 1.0 / VERTEX_MASS;
@@ -76,15 +83,27 @@ double TIME_STEP = 1.0;
 double TOTAL_TIME = 50.0;
 size_t STEPS = (size_t)std::ceil(TOTAL_TIME / TIME_STEP);
 
+double edge_length_factor = 4.0; // edges resampled at threshold resolution T1 / factor;
+
+size_t SE_sides = 12; // sides in approximated structuring element - dodecagon
+double alpha = 2 * CGAL_PI / SE_sides; // angle projected by each SE side at center
+double sin_alpha_by_2 = std::sin(alpha / 2.0);
+double tan_alpha_by_2 = std::tan(alpha / 2.0);
+double lower_lim = CGAL_PI - alpha; // lower limit on interior angle
+double upper_lim = CGAL_PI + alpha; // upper limit on interior angle
+
+
+
 // Global Variables
 std::vector<Point_3> vertex_vec;
 std::vector<Vector_3> normal_vec;
 std::vector<std::pair<double, double>> angles;
+std::vector<double> interior_angles;
 std::vector<double> sdf_vec;
 std::vector<VertexMemo> vmemo_vec;
 std::vector<EdgeMemo> ememo_vec;
 arma::vec max_change_vec(STEPS);
-size_t nMove;
+size_t nMove = 0;
 
 // FILE FORMAT:
 // #number of polygons with holes <num_poly>
@@ -231,7 +250,6 @@ void writeSDF(std::string filename)
 	ofile.close();
 }
 
-
 // get vertices as vector of Point_3 for a simple polygon
 void getVertexVector(const Polygon& pg)
 {
@@ -248,13 +266,28 @@ void getVertexVector(const Pwh& pwh)
 		getVertexVector(*hi);
 }
 
-// get counter-clockwise angle between two vectors
+// get unit vector along a vector
+Vector_2 unitVector(Vector_2 vec)
+{
+	return vec / CGAL::sqrt(CGAL::to_double(vec.squared_length()));
+}
+
+// get counter-clockwise angle between two vectors between 0 and 2*pi
 double ccwAngle(const Vector_2& v1, const Vector_2& v2)
 {
 	double dot = CGAL::to_double(v1.x()*v2.x() + v1.y()*v2.y());
 	double det = CGAL::to_double(v1.x()*v2.y() - v1.y()*v2.x());
 	double angle = std::atan2(det, dot);
 	return (angle >= 0) ? angle : 2.0 * CGAL_PI + angle;
+}
+
+// get interior angle between two vectors between 0 and 2*pi
+double interiorAngle(const Vector_2& v1, const Vector_2& v2)
+{
+	double dot = CGAL::to_double(v1.x()*v2.x() + v1.y()*v2.y());
+	double det = CGAL::to_double(v1.x()*v2.y() - v1.y()*v2.x());
+	double angle = std::atan2(det, dot);
+	return CGAL_PI - angle;
 }
 
 // computes the perimeter of a polygon
@@ -353,19 +386,17 @@ void getNormals(const Polygon& pg, bool isHole = false)
 
 	CGAL::Orientation o = pg.orientation();
 
-	normal = ((pg.edges_end() - 1)->to_vector() + ei->to_vector()).perpendicular(o);
+	normal = unitVector((unitVector((pg.edges_end() - 1)->to_vector()) + unitVector(ei->to_vector())).perpendicular(o));
 	if (!isHole)
 		normal = -normal;
-	normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
 	normal_vec.push_back(Vector_3(normal.x(), normal.y(), 0.0));
 	vi++; ei++;
 
 	for (; vi != pg.vertices_end(); vi++, ei++)
 	{
-		normal = ((ei - 1)->to_vector() + ei->to_vector()).perpendicular(o);
+		normal = unitVector((unitVector((ei - 1)->to_vector()) + unitVector(ei->to_vector())).perpendicular(o));
 		if (!isHole)
 			normal = -normal;
-		normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
 		normal_vec.push_back(Vector_3(normal.x(), normal.y(), 0.0));
 	}
 }
@@ -388,26 +419,26 @@ void getNormalsAndAngles(const Polygon& pg, bool isHole = false)
 
 	CGAL::Orientation o = pg.orientation();
 
-	edge1 = (pg.edges_end() - 1)->to_vector();
-	edge2 = ei->to_vector();
-	normal = (edge1 + edge2).perpendicular(o);
+	edge1 = unitVector((pg.edges_end() - 1)->to_vector());
+	edge2 = unitVector(ei->to_vector());
+	normal = unitVector((edge1 + edge2).perpendicular(o));
 	if (!isHole)
 		normal = -normal;
-	normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
 	normal_vec.push_back(Vector_3(normal.x(), normal.y(), 0.0));
 	angles.push_back(std::pair<double, double>(ccwAngle(-normal, -edge1), ccwAngle(edge2, -normal)));
+	interior_angles.push_back(interiorAngle(edge1, edge2));
 	vi++; ei++;
 
 	for (; vi != pg.vertices_end(); vi++, ei++)
 	{
-		edge1 = (ei - 1)->to_vector();
-		edge2 = ei->to_vector();
-		normal = (edge1 + edge2).perpendicular(o);
+		edge1 = unitVector((ei - 1)->to_vector());
+		edge2 = unitVector(ei->to_vector());
+		normal = unitVector((edge1 + edge2).perpendicular(o));
 		if (!isHole)
 			normal = -normal;
-		normal = normal / CGAL::sqrt(CGAL::to_double(normal.squared_length()));
 		normal_vec.push_back(Vector_3(normal.x(), normal.y(), 0.0));
 		angles.push_back(std::pair<double, double>(ccwAngle(-normal, -edge1), ccwAngle(edge2, -normal)));
+		interior_angles.push_back(interiorAngle(edge1, edge2));
 	}
 }
 
@@ -518,6 +549,16 @@ std::vector<double> smooth(std::vector<double> numbers, size_t oneSideWindow)
 	return sNumbers;
 }
 
+// computes corner force magnitude
+double getCornerForceMag(double angle) //half of the interior angle
+{
+	if (angle < lower_lim)
+		return -K_C * (2 * sin_alpha_by_2 - 3 * tan_alpha_by_2 * sin(angle / 2.0) + cos(angle / 2.0)); // inward force
+	if (angle > upper_lim)
+		return K_C * (2 * sin_alpha_by_2 - 3 * tan_alpha_by_2 * sin(angle / 2.0) - cos(angle / 2.0)); // outward force
+	return 0.0;
+}
+
 // get SDF values
 void computeSDF(const Pwh& pwh, bool SDFexists = false)
 {
@@ -527,7 +568,7 @@ void computeSDF(const Pwh& pwh, bool SDFexists = false)
 	sdf_vec.clear();
 
 	// use pre-existing sdf values if already computed before
-	std::string sdf_file = FILENAME.substr(0, FILENAME.size() - 4) + ".sdf";
+	std::string sdf_file = FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER +".sdf";
 	std::ifstream ifile(sdf_file);
 	if (SDFexists && ifile.good()) // if the file exists and can be read
 	{
@@ -614,15 +655,19 @@ void setMovable(
 	const Polygon& pg,
 	size_t startIdx,
 	size_t curIdx,
-	size_t n_ring = 0
+	int n_ring = 0
 )
 {
 	size_t idx = curIdx - n_ring;
-	for (size_t i = 0; i <= 2*n_ring; i++, idx++)
+	double force = K_SDF*(1.0 - vmemo_vec[curIdx].get_sdf() / T1);
+	for (int i = -n_ring; i <= n_ring; i++, idx++)
 	{
 		if ((idx - startIdx) >= pg.size())
 			idx = startIdx + (idx - startIdx) % pg.size();
 		vmemo_vec[idx].isMovable = true;
+		vmemo_vec[idx].setMaxMag(force / std::exp(std::abs(i)));
+		//vmemo_vec[idx].setMaxMag(force / std::pow(1.5, std::abs(i)));
+		//vmemo_vec[idx].setMaxMag(force / (std::abs(i) + 1));
 	}
 	//Vertex_memo_map[vi].isMovable = true;
 	//if (n_ring <= 0) return;
@@ -654,7 +699,6 @@ void populate_memos(
 		vmemo.set_normal(normal_vec[loc]);
 		vmemo.set_sdf(sdf_vec[loc]);
 		vmemo.set_ref_point(vertex_vec[loc] - sdf_vec[loc] * normal_vec[loc] / 2.0);
-		vmemo.compute_force(K_SDF, K_S, K_D, T1);
 
 		vmemo_vec.push_back(vmemo);
 	}
@@ -686,6 +730,9 @@ size_t populate_memos(
 
 	computeSDF(pwh, SDFexists);
 
+	vmemo_vec.reserve(sdf_vec.size());
+	ememo_vec.reserve(sdf_vec.size());
+
 	size_t startIdx = 0, pgId = 0;
 	populate_memos(pwh.outer_boundary(), startIdx, pgId);
 	startIdx += pwh.outer_boundary().size();
@@ -698,6 +745,7 @@ size_t populate_memos(
 	size_t movable = 0;
 	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it != vmemo_vec.end(); it++)
 	{
+		it->compute_force(K_SDF, K_S, K_D, T1);
 		if (it->isMovable)
 			it->index = ++movable;
 		else
@@ -864,6 +912,7 @@ void update(
 	arma::vec& VELOCITY
 )
 {
+
 	size_t idx;
 	Vector_2 del;
 	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it != vmemo_vec.end(); it++)
@@ -873,6 +922,7 @@ void update(
 			idx = (it->index - 1) * 2;
 			del = Vector_2(delta_POS(idx), delta_POS(idx + 1));
 			it->set_vertex(it->get_vertex() + del);
+			//it->set_velocity(VELOCITY(idx)+delta_VEL(idx), VELOCITY(idx + 1) + delta_VEL(idx+1));
 		}
 	}
 
@@ -881,7 +931,7 @@ void update(
 	// TODO: decide whether to update normals and sdf_force every time step or not
 	// updating normals
 	getVertexVector(pwh);
-	getNormals(pwh);
+	getNormalsAndAngles(pwh);
 
 	for (size_t i = 0; i < vmemo_vec.size(); i++)
 	{
@@ -889,8 +939,6 @@ void update(
 		vmemo_vec[i].compute_force(K_SDF, K_S, K_D, T1);
 		ememo_vec[i].compute_force(K_S, K_D);
 	}
-
-	global_assembly(FORCE, JPOS, JVEL, VELOCITY, N);
 }
 
 // computes the maxima of change of location of vertices
@@ -921,12 +969,191 @@ double march_and_update(
 {
 	arma::vec delta_VEL;
 	arma::vec delta_POS;
+	
+	global_assembly(FORCE, JPOS, JVEL, VELOCITY, N);
 	march_one_time_step(delta_VEL, delta_POS, N, FORCE, JPOS, JVEL, VELOCITY);
 	update(delta_POS, delta_VEL, N, pwh, FORCE, JPOS, JVEL, VELOCITY);
+
 	return max_change(delta_POS);
 }
 
 
+// MINKOWSKI OPERATIONS
+Polygon getStructuringElement(double radius, size_t sides = 12);
+Polygon boundingPolygon(const Polygon& pg, double pad);
+Pwh_list subtract(const Polygon& pgA, const Polygon& pgB);
+Pwh_list subtract(const Pwh_list& pwh_list, const Pwh& pwh);
+Pwh dilate(const Polygon& pg, const Polygon& structElem);
+Pwh_list erode(const Polygon& pg, const Polygon& structElem);
+Pwh dilate(const Pwh& pwh, const Polygon& structElem);
+Pwh_list erode(const Pwh& pwh, const Polygon& structElem);
+
+// create structuring element
+Polygon getStructuringElement(double radius, size_t sides)
+{
+	double theta = 2 * CGAL_PI / sides;
+	double cos = std::cos(theta), sin = std::sin(theta);
+
+	double x = radius, y = 0.0, X, Y;
+	Polygon pg;
+
+	for (size_t i = 0; i < sides; i++)
+	{
+		X = x;
+		Y = y;
+		pg.push_back(Point_2(X, Y));
+		x = X*cos - Y*sin;
+		y = X*sin + Y*cos;
+	}
+
+	std::ofstream outfile("../data/stElem.dat");
+	outfile << write(pg);
+	outfile.close();
+
+	return pg;
+}
+
+// get the bounding box as Polygon_2
+Polygon boundingPolygon(const Polygon& pg, double pad)
+{
+	CGAL::Bbox_2 bb = CGAL::bbox_2(pg.vertices_begin(), pg.vertices_end());
+	Point_2 corners[] = { Point_2(bb.xmin() - pad, bb.ymin() - pad), Point_2(bb.xmax() + pad, bb.ymin() - pad),
+		Point_2(bb.xmax() + pad, bb.ymax() + pad), Point_2(bb.xmin() - pad, bb.ymax() + pad) };
+	Polygon result(corners, corners + 4);
+	return result;
+}
+
+// subtract a Polygon from another Polygon
+Pwh_list subtract(const Polygon& pgA, const Polygon& pgB)
+{
+	Pwh_list out;
+	CGAL::difference(pgA, pgB, std::back_inserter(out));
+	return out;
+}
+
+// subtract a Pwh from list of Pwh
+Pwh_list subtract(const Pwh_list& pwh_list, const Pwh& pwh)
+{
+	Pwh_list out;
+	for (Pwh_list::const_iterator it = pwh_list.begin(); it != pwh_list.end(); it++)
+		CGAL::difference(*it, pwh, std::back_inserter(out));
+
+	return out;
+}
+
+// Pg dilate operation
+Pwh dilate(const Polygon& pg, const Polygon& structElem)
+{
+	Pwh dilate_pg = CGAL::minkowski_sum_2(pg, structElem);
+	return dilate_pg;
+}
+
+// Pg erode operation
+Pwh_list erode(const Polygon& pg, const Polygon& structElem)
+{
+	Pwh_list comp_list = subtract(boundingPolygon(pg, T1 * 2), pg);
+
+	CGAL::Polygon_vertical_decomposition_2<Kernel> decomp;
+	Pwh temp = CGAL::minkowski_sum_2(comp_list.front(), structElem, decomp);
+
+	Pwh_list erode_pg;
+	for (Pwh::Hole_iterator hi = temp.holes_begin(); hi != temp.holes_end(); hi++)
+	{
+		hi->reverse_orientation();
+		erode_pg.push_back(Pwh(*hi));
+	}
+
+	return erode_pg;
+}
+
+// Pwh dilate operation
+Pwh dilate(const Pwh& pwh, const Polygon& structElem)
+{
+	Pwh dilate_pwh = CGAL::minkowski_sum_2(pwh, structElem);
+
+	return dilate_pwh;
+}
+
+// Pwh erode operation
+Pwh_list erode(const Pwh& pwh, const Polygon& structElem)
+{
+	Pwh_list temp = erode(pwh.outer_boundary(), structElem);
+
+	Polygon hole;
+	for (Pwh::Hole_const_iterator hi = pwh.holes_begin(); hi != pwh.holes_end(); hi++)
+	{
+		hole = *hi;
+		hole.reverse_orientation();
+		temp = subtract(temp, dilate(hole, structElem));
+	}
+
+	Pwh_list erode_pwh;
+	CGAL::join(temp.begin(), temp.end(), std::back_inserter(erode_pwh));
+
+	return erode_pwh;
+}
+
+// opening operation
+Pwh_list open(const Pwh& pwh, const Polygon& structElem)
+{
+	Pwh_list eroded = erode(pwh, structElem);
+	Pwh_list temp, opened;
+	for (Pwh_list::const_iterator it = eroded.begin(); it != eroded.end(); it++)
+		temp.push_back(dilate(*it, structElem));
+
+	CGAL::join(temp.begin(), temp.end(), std::back_inserter(opened));
+
+	std::ofstream outfile("../data/open.dat");
+	outfile << write(opened);
+	outfile.close();
+
+	return opened;
+}
+
+// closing operation
+Pwh_list close(const Pwh& pwh, const Polygon& structElem)
+{
+	Pwh dilated = dilate(pwh, structElem);
+	Pwh_list closed = erode(dilated, structElem);
+
+	std::ofstream outfile("../data/close.dat");
+	outfile << write(closed);
+	outfile.close();
+
+	return closed;
+}
+
+// list opening operation
+Pwh_list open(const Pwh_list& pwh_list, const Polygon& structElem)
+{
+	Pwh_list temp, opened;
+	for (Pwh_list::const_iterator it = pwh_list.begin(); it != pwh_list.end(); it++)
+		temp.splice(temp.end(), open(*it, structElem));
+
+	CGAL::join(temp.begin(), temp.end(), std::back_inserter(opened));
+
+	std::ofstream outfile("../data/open.dat");
+	outfile << write(opened);
+	outfile.close();
+
+	return opened;
+}
+
+// list closing operation
+Pwh_list close(const Pwh_list& pwh_list, const Polygon& structElem)
+{
+	Pwh_list temp, closed;
+	for (Pwh_list::const_iterator it = pwh_list.begin(); it != pwh_list.end(); it++)
+		temp.splice(temp.end(), close(*it, structElem));
+
+	CGAL::join(temp.begin(), temp.end(), std::back_inserter(closed));
+
+	std::ofstream outfile("../data/close.dat");
+	outfile << write(closed);
+	outfile.close();
+
+	return closed;
+}
 
 
 
@@ -1039,12 +1266,14 @@ int main(int argc, char *argv[])
 	read(FILENAME, slice);
 
 	std::cout << "Starting resampling..." << std::endl;
-	Pwh pwh = resample(slice.front(), T1 / 4.0);
+	Pwh pwh = resample(slice.front(), T1 / edge_length_factor);
 	std::cout << "Resampling done!" << std::endl;
+
+	Polygon structElem = getStructuringElement(T1 / 2, SE_sides);
 
 	// populate memos - compute and store normals, sdf, forces, and Jacobians
 	std::cout << "Populating memos..." << std::endl;
-	nMove = populate_memos(pwh, true); // nMove is the number of movable vertices
+	nMove = populate_memos(pwh, false); // nMove is the number of movable vertices
 	std::cout << "Populating completed!\nNumber of movable vertices = " << nMove << std::endl;
 	std::cout << std::endl;
 
@@ -1066,7 +1295,12 @@ int main(int argc, char *argv[])
 		std::cout << "Performing numerical integration..." << std::endl;
 		for (size_t i = 0; i < STEPS; i++)
 		{
+			std::cout << "Time step: " << i+1 << " ..." << std::endl;
 			max_change_vec[i] = march_and_update(nMove, pwh, FORCE, JPOS, JVEL, VELOCITY);
+			std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
+			outfile << write(pwh);
+			outfile.close();
+			std::cout << "Max change = " << max_change_vec[i] << std::endl;
 		}
 		std::cout << "Integration completed!" << std::endl;
 		std::cout << std::endl;
@@ -1083,6 +1317,8 @@ int main(int argc, char *argv[])
 	std::ofstream outfile(pwhOutFile);
 	outfile << write(pwh);
 	outfile.close();
+	
+	close(open(pwh, structElem), structElem);
 
 	generateOutput(outputFile, pwh);
 

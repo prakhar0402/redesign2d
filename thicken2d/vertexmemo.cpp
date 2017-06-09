@@ -9,8 +9,7 @@ VertexMemo::VertexMemo(Kernel::Point_2 pnt, size_t location, size_t id)
 	normal.fill(0.0);
 	velocity.set_size(2);
 	velocity.fill(0.0);
-	sdf_force.set_size(2);
-	sdf_force.fill(0.0);
+	sdf_force = 0.0;
 	sdf = 0.0;
 	area_factor = 1.0;
 	ref_point = Kernel::Point_2(0.0, 0.0);
@@ -30,14 +29,29 @@ void VertexMemo::set_vertex(Kernel::Point_2 pnt)
 	v = pnt;
 }
 
+void VertexMemo::set_vertex(double x, double y)
+{
+	v = Kernel::Point_2(x, y);
+}
+
 void VertexMemo::set_normal(Kernel::Vector_3 vertex_normal)
 {
 	normal << CGAL::to_double(vertex_normal.x()) << CGAL::to_double(vertex_normal.y());
 }
 
+void VertexMemo::set_normal(double x, double y)
+{
+	normal << x << y;
+}
+
 void VertexMemo::set_velocity(const arma::vec& vel)
 {
 	velocity = vel;
+}
+
+void VertexMemo::set_velocity(double x, double y)
+{
+	velocity << x << y;
 }
 
 void VertexMemo::set_sdf(double dia)
@@ -56,6 +70,12 @@ void VertexMemo::set_ref_point(Kernel::Point_3 ref)
 	initial_length = compute_length();
 }
 
+void VertexMemo::set_ref_point(double x, double y)
+{
+	ref_point = Kernel::Point_2(x, y);
+	initial_length = compute_length();
+}
+
 double VertexMemo::compute_length()
 {
 	current_length = CGAL::sqrt(CGAL::to_double(CGAL::squared_distance(v, ref_point)));
@@ -64,22 +84,20 @@ double VertexMemo::compute_length()
 
 void VertexMemo::compute_sdf_force(const double& K_sdf, const double& threshold_dia)
 {
-	double mag = 0.0;
+	sdf_force = 0.0;
 	if (threshold_dia > sdf)
-		mag = K_sdf*area_factor*(1.0 - sdf / threshold_dia);
-		//mag = -K_sdf*area*std::log(sdf / threshold_dia);
-		//mag = K_sdf*area*(threshold_dia - sdf);
-		//mag = K_sdf*area*CGAL::square(threshold_dia - sdf);
-
-	sdf_force = mag*normal;
+		sdf_force = K_sdf*area_factor*(1.0 - sdf / threshold_dia);
+		//sdf_force = -K_sdf*area*std::log(sdf / threshold_dia);
+		//sdf_force = K_sdf*area*(threshold_dia - sdf);
+		//sdf_force = K_sdf*area*CGAL::square(threshold_dia - sdf);
 }
 
 void VertexMemo::compute_force(const double& K_sdf, const double& K_s, const double& K_d, const double& threshold_dia)
 {
-	if (threshold_dia > sdf)
+	if (isMovable)
 	{
 		compute_length();
-		compute_sdf_force(K_sdf, threshold_dia);
+		//compute_sdf_force(K_sdf, threshold_dia);
 
 		arma::vec pos1, pos2, vec12;
 		pos1 << CGAL::to_double(v.x()) << CGAL::to_double(v.y());
@@ -91,7 +109,7 @@ void VertexMemo::compute_force(const double& K_sdf, const double& K_s, const dou
 		double coef1 = K_s*(1 - initial_length / current_length);
 		double coef2 = K_s*initial_length / pow(current_length, 3);
 
-		force = coef1*vec12 + K_d*(-velocity) + sdf_force;
+		force = coef1*vec12 + K_d*(-velocity) + sdf_force*normal;
 
 		Jpos = -coef2*mv12;
 		Jpos.diag() -= coef1;
@@ -127,7 +145,7 @@ arma::vec VertexMemo::get_velocity()
 
 arma::vec VertexMemo::get_sdf_force()
 {
-	return sdf_force;
+	return sdf_force*normal;
 }
 
 arma::vec VertexMemo::get_force()
@@ -143,4 +161,14 @@ arma::mat VertexMemo::get_Jacobian_pos()
 arma::mat VertexMemo::get_Jacobian_vel()
 {
 	return Jvel;
+}
+
+void VertexMemo::setSDFForceMag(double f)
+{
+	sdf_force = f;
+}
+
+void VertexMemo::setMaxMag(double f)
+{
+	sdf_force = std::max(sdf_force, f);
 }

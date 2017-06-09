@@ -6,7 +6,7 @@ inputFile = '../data/example/example';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
-outputIdentifier = '0000';
+outputIdentifier = '0005';
 filename = [inputFile, '_', outputIdentifier];
 
 pwh_list = readPWHList([filename, '.dat']);

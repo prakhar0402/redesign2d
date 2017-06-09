@@ -15,9 +15,13 @@ class VertexMemo
 public:
 	VertexMemo(Kernel::Point_2 pnt, size_t location, size_t id);
 	void set_vertex(Kernel::Point_2 pnt);
+	void set_vertex(double x, double y);
 	void set_normal(Kernel::Vector_3 vertex_normal);
+	void set_normal(double x, double y);
 	void set_velocity(const arma::vec& vel);
+	void set_velocity(double x, double y);
 	void set_ref_point(Kernel::Point_3 ref);
+	void set_ref_point(double x, double y);
 	void set_sdf(double dia);
 	void set_area_factor(double value);
 	double compute_length();
@@ -36,6 +40,8 @@ public:
 	arma::vec get_force();
 	arma::mat get_Jacobian_pos();
 	arma::mat get_Jacobian_vel();
+	void setSDFForceMag(double f);
+	void setMaxMag(double f);
 
 private:
 	Kernel::Point_2 v;
@@ -46,7 +52,7 @@ private:
 	double current_length;
 	double sdf;
 	double area_factor; // sum of projected area of all faces around the vertex divided by average projected area for all vertices
-	arma::vec sdf_force;
+	double sdf_force;
 	arma::vec force;
 	arma::mat Jpos;
 	arma::mat Jvel;
