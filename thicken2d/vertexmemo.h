@@ -13,7 +13,7 @@ typedef CGAL::Polygon_2<Kernel> Polygon;
 class VertexMemo
 {
 public:
-	VertexMemo(Kernel::Point_2 pnt, size_t location, size_t id);
+	VertexMemo(Kernel::Point_2 pnt, size_t location);
 	void set_vertex(Kernel::Point_2 pnt);
 	void set_vertex(double x, double y);
 	void set_normal(Kernel::Vector_3 vertex_normal);
@@ -23,16 +23,13 @@ public:
 	void set_ref_point(Kernel::Point_3 ref);
 	void set_ref_point(double x, double y);
 	void set_sdf(double dia);
-	void set_area_factor(double value);
 	double compute_length();
-	void compute_sdf_force(const double& K_sdf, const double& threshold_dia);
+	//void compute_sdf_force(const double& K_sdf, const double& threshold_dia);
 	double get_sdf();
-	double get_area_factor();
 	Kernel::Point_2 get_vertex();
 	arma::vec get_normal();
 	arma::vec get_velocity();
 	arma::vec get_sdf_force();
-	size_t pgId; // 0 for outer_boundary, and 1,2,3,... for holes 0,1,2,...
 	size_t loc; // location in vector of all vertices
 	size_t index; // global matrix index for movable vertice
 	bool isMovable;
@@ -41,7 +38,8 @@ public:
 	arma::mat get_Jacobian_pos();
 	arma::mat get_Jacobian_vel();
 	void setSDFForceMag(double f);
-	void setMaxMag(double f);
+	void setMaxSDFMag(double f);
+	void setCornerForceMag(double f);
 
 private:
 	Kernel::Point_2 v;
@@ -51,8 +49,8 @@ private:
 	double initial_length;
 	double current_length;
 	double sdf;
-	double area_factor; // sum of projected area of all faces around the vertex divided by average projected area for all vertices
 	double sdf_force;
+	double corner_force;
 	arma::vec force;
 	arma::mat Jpos;
 	arma::mat Jvel;

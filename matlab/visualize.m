@@ -19,11 +19,13 @@ identifier = fgetl(fid);
 line = fgetl(fid);
 T1 = fscanf(fid, '%f\n', 1);
 line = fgetl(fid);
-K_SDF = fscanf(fid, '%f\n', 1);
-line = fgetl(fid);
 K_S = fscanf(fid, '%f\n', 1);
 line = fgetl(fid);
 K_D = fscanf(fid, '%f\n', 1);
+line = fgetl(fid);
+K_SDF = fscanf(fid, '%f\n', 1);
+line = fgetl(fid);
+K_C = fscanf(fid, '%f\n', 1);
 line = fgetl(fid);
 VERTEX_MASS = fscanf(fid, '%f\n', 1);
 line = fgetl(fid);
@@ -44,6 +46,8 @@ line = fgetl(fid);
 normals = fscanf(fid, '%f %f\n', [2 nV])';
 line = fgetl(fid);
 angles = fscanf(fid, '%f %f\n', [2 nV])';
+line = fgetl(fid);
+interiorAngles = fscanf(fid, '%f\n', nV);
 line = fgetl(fid);
 max_change = fscanf(fid, '%f\n', STEPS);
 
@@ -110,3 +114,27 @@ xlabel({['Normals: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
 set(gca, 'XTick', '', 'YTick', '')
 box on
 hold on
+
+
+figure
+plotPWHwithCdata(pwh_list.pwh{1}, interiorAngles*180/pi)
+colorbar
+axis equal
+xlabel({['Thin: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
+set(gca, 'XTick', '', 'YTick', '')
+box on
+hold on
+
+open_pwh_list = readPWHList([filename, '_open.dat']);
+
+figure
+hold on
+plotPWHList(open_pwh_list)
+axis equal
+
+close_pwh_list = readPWHList([filename, '_close.dat']);
+
+figure
+hold on
+plotPWHList(close_pwh_list)
+axis equal

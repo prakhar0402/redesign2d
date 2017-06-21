@@ -39,7 +39,7 @@ void EdgeMemo::compute_force(const double& K_s, const double& K_d)
 	double coef1 = K_s*(1 - initial_length / current_length);
 	double coef2 = K_s*initial_length / pow(current_length, 3);
 
-	force = coef1*vec12 + K_d*(source->get_velocity() - target->get_velocity());
+	force = coef1*vec12 + K_d*(target->get_velocity() - source->get_velocity());
 
 	Jpos = -coef2*mv12;
 	Jpos.diag() -= coef1;

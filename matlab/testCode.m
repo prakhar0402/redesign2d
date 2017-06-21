@@ -13,17 +13,18 @@ inputFile = '../data/example/example';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
-outputIdentifier = '0001';
+outputIdentifier = 'v007';
 filename = [inputFile, '_', outputIdentifier];
 
 figure
 hold on
-for i = 1 : 50
-    pause(1)
+for i = 1 : 31
+    pause(2)
     cla
     pwh_list = readPWHList([filename, '.dat_', num2str(i)]);
     plotPWHList(pwh_list)
     axis equal
+    title(i)
 end
 
 %%%%
