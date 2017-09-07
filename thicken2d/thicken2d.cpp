@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <random>
 #include <algorithm>
+
 #include <CGAL/Exact_predicates_exact_constructions_kernel.h>
 #include <CGAL/minkowski_sum_2.h>
 #include <CGAL/Small_side_angle_bisector_decomposition_2.h>
@@ -15,12 +16,9 @@
 #include <CGAL/Bbox_2.h>
 #include <CGAL/Polygon_vertical_decomposition_2.h>
 #include <CGAL/connect_holes.h>
-
-#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/enum.h>
 #include <CGAL/boost/graph/graph_traits_Arrangement_2.h>
 #include <CGAL/number_utils.h>
-
 #include <CGAL/Segment_2.h>
 #include <CGAL/Simple_cartesian.h>
 #include <CGAL/AABB_tree.h>
@@ -58,21 +56,21 @@ std::string FILENAME = "../data/example/example.dat";
 std::string IDENTIFIER = "test"; // use it to uniquely name each run of the code for result file generation
 
 // SDF parameters
-size_t num_samples = 12;
-double cone_half_angle = CGAL_PI / 12.0;
+const size_t num_samples = 12;
+const double cone_half_angle = CGAL_PI / 12.0;
 std::uniform_real_distribution<double> unif(-cone_half_angle, cone_half_angle);
 std::default_random_engine re;
 
-double edge_length_factor = 4.0; // edges resampled at threshold resolution T1 / factor;
+double edge_length_factor = 4.0; // edges resampled at threshold resolution Td / factor;
 
-double T1 = 0.4;
+double Td = 0.4;
 
 double K_S = 64.0;
-double K_D = 128.0;
+double K_D = 1024.0;
 double ksdf_multiplier = 1.2;
 double kc_multiplier = 0.75;
-double K_SDF = ksdf_multiplier * K_S * T1;
-double K_C = kc_multiplier * K_S * T1 / edge_length_factor;
+double K_SDF = ksdf_multiplier * K_S * Td;
+double K_C = kc_multiplier * K_S * Td / edge_length_factor;
 
 double VERTEX_MASS = 1.0;
 double MASS_INV = 1.0 / VERTEX_MASS;
@@ -295,7 +293,6 @@ double getPerimeter(const Polygon& pg)
 
 // TODO: check and correct orientation of holes
 
-
 // resamples a polygon with almost-equidistant points
 // each edge is divided into N segments such that...
 // N is the smallest number ensuring the segment length is less than delta
@@ -318,50 +315,6 @@ Polygon resample(const Polygon& pg, double delta)
 		}
 	}
 	return rpg;
-
-
-	//// the following code divided polygon is exactly equidistant points
-	//// but it doesn't preserve the existing vertices
-	//// initialize some variables
-	//Polygon::Vertex_const_iterator vi = pg.vertices_begin();
-	//Point_2 current(vi->x(), vi->y());
-	//vi++;
-	//Point_2 next(vi->x(), vi->y());
-	//rpg.push_back(current);
-	//double dist = 0.0, edgelength = 0.0;
-	//bool loopEnd = false;
-
-	//// loop until reaching end of polygon
-	//while (!loopEnd || vi != pg.vertices_begin()+1)
-	//{
-	//	edgelength = CGAL::sqrt(CGAL::to_double((next - current).squared_length())); // get the current edge length
-	//	if (edgelength + dist < delta)
-	//	{
-	//		// next vertex too close, increment distance and jump to next edge
-	//		dist += edgelength;
-	//		vi++;
-	//		current = next;
-	//		if (vi == pg.vertices_end())
-	//		{
-	//			loopEnd = true;
-	//			vi = pg.vertices_begin();
-	//		}
-	//		next = Point_2(vi->x(), vi->y());
-
-	//		std::cout << "-:-" << std::endl;
-	//	}
-	//	else
-	//	{
-	//		// resample a new point at a distance (delta - distance covered) from current on the edge <current, next>
-	//		Point_2 pnt(current.x() + (delta - dist)*(next.x() - current.x()) / edgelength, current.y() + (delta - dist)*(next.y() - current.y()) / edgelength);
-
-	//		// insert the new point in the result and at the next position and increment size of loop
-	//		rpg.push_back(pnt);
-	//		current = pnt;
-	//		dist = 0.0; // reinitialize distance
-	//	}
-	//}
-	//return rpg;
 }
 
 // resamples a polygon with holes with almost-equidistant points
@@ -454,7 +407,7 @@ void getNormalsAndAngles(const Pwh& pwh)
 }
 
 // sample rays in a cone vertexed at source with specified axis direction
-// TODO: fix the random angles for all cones to be same?
+// TODO: fix the random angles for all cones to be same? - Not required
 void sampleRays(const Point_3& source, const Vector_3& axis, std::pair<double, double> edge_angle, std::vector<Ray>& rays)
 {
 	double angle, cos, sin;
@@ -530,7 +483,7 @@ double niceAverage(std::vector<double> numbers)
 }
 
 // TODO: fix smoothing and then smooth sdf values
-// smooth - INCORRECT IMPLEMENTATION
+// smooth - INCORRECT IMPLEMENTATION - DO NOT USE IN CURRENT FORM
 std::vector<double> smooth(std::vector<double> numbers, size_t oneSideWindow)
 {
 	size_t windowSz = 2 * oneSideWindow + 1;
@@ -609,32 +562,6 @@ void computeSDF(const Pwh& pwh, bool SDFexists = false)
 	}
 }
 
-// AABB intersection testing function
-void intersect(Polygon& pg, Point_2& source, Vector_2& dir)
-{
-	Seg_list seg_list;
-	for (Polygon::Edge_const_iterator ei = pg.edges_begin(); ei != pg.edges_end(); ei++)
-	{
-		seg_list.push_back(Segment(Point_3(ei->source().x(), ei->source().y(), 0.0), Point_3(ei->target().x(), ei->target().y(), 0.0)));
-	}
-
-	Tree tree(seg_list.begin(), seg_list.end());
-
-	Ray ray(Point_3(source.x(), source.y(), 0.0), Vector_3(dir.x(), dir.y(), 0.0));
-
-	std::list<Ray_intersection> intersections;
-	tree.all_intersections(ray, std::back_inserter(intersections));
-
-	for (std::list<Ray_intersection>::const_iterator it = intersections.begin(); it != intersections.end(); it++)
-	{
-		const Point_3* p = boost::get<Point_3>(&(it->value().first));
-		if (p)
-			std::cout << "intersection object is a point " << *p << std::endl;
-	}
-}
-
-// TODO: is pgId in vertex memo required?
-
 // reset pwh from vmemo_vec
 void createPwhFromVmemo(Pwh &pwh)
 {
@@ -698,9 +625,9 @@ void populate_memos(
 		if ((loc2 - startIdx) == pg.size()) // for cyclic loop of the polygon
 			loc2 = startIdx;
 
-		if (sdf_vec[loc1] <= T1)
+		if (sdf_vec[loc1] <= Td)
 		{
-			force = K_SDF*(1.0 - sdf_vec[loc1] / T1);
+			force = K_SDF*(1.0 - sdf_vec[loc1] / Td);
 			setSDFNeighbor(pg, startIdx, loc1, force, 3);
 		}
 
@@ -738,7 +665,7 @@ size_t populate_memos(
 	size_t movable = 0; // number of movable vertices
 	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it != vmemo_vec.end(); it++)
 	{
-		it->compute_force(K_SDF, K_S, K_D, T1);
+		it->compute_force(K_SDF, K_S, K_D, Td);
 		if (it->isMovable)
 			it->index = ++movable;
 		else
@@ -929,7 +856,7 @@ void update(
 	for (size_t i = 0; i < vmemo_vec.size(); i++)
 	{
 		vmemo_vec[i].set_normal(normal_vec[i]);
-		vmemo_vec[i].compute_force(K_SDF, K_S, K_D, T1);
+		vmemo_vec[i].compute_force(K_SDF, K_S, K_D, Td);
 		ememo_vec[i].compute_force(K_S, K_D);
 	}
 }
@@ -1044,7 +971,7 @@ Pwh dilate(const Polygon& pg, const Polygon& structElem)
 // Pg erode operation: outputs list of Pwh
 Pwh_list erode(const Polygon& pg, const Polygon& structElem)
 {
-	Pwh_list comp_list = subtract(boundingPolygon(pg, T1 * 2), pg); // complement
+	Pwh_list comp_list = subtract(boundingPolygon(pg, Td * 2), pg); // complement
 
 	CGAL::Polygon_vertical_decomposition_2<Kernel> decomp;
 	Pwh temp = CGAL::minkowski_sum_2(comp_list.front(), structElem, decomp); // dilate the complement
@@ -1164,7 +1091,7 @@ void generateOutput(
 	std::ofstream ofile(filename);
 	ofile << "Input File:\n" << FILENAME << "\n";
 	ofile << "Output Identifier:\n" << IDENTIFIER << "\n";
-	ofile << "Thickness Threshold:\n" << T1 << "\n";
+	ofile << "Thickness Threshold:\n" << Td << "\n";
 	ofile << "Force Constant Spring:\n" << K_S << "\n";
 	ofile << "Force Constant Damper:\n" << K_D << "\n";
 	ofile << "Force Constant SDF:\n" << K_SDF << "\n";
@@ -1206,9 +1133,9 @@ void print_usage()
 	std::cout << "FLAGS:" << std::endl;
 	std::cout << "\t-f:\tinput file path FILENAME (default = \"..\\data\\example\\example.dat\")" << std::endl;
 	std::cout << "\t-id:\texperiment index IDENTIFIER (default = \"test\")" << std::endl;
-	std::cout << "\t-t1:\tthreshold T1 (default = 0.4)" << std::endl;
+	std::cout << "\t-td:\tthreshold Td (default = 0.4)" << std::endl;
 	std::cout << "\t-ks:\tspring constant K_S (default = 64.0)" << std::endl;
-	std::cout << "\t-kd:\tdamper constant K_D (default = 128.0)" << std::endl;
+	std::cout << "\t-kd:\tdamper constant K_D (default = 1024.0)" << std::endl;
 	std::cout << "\t-ksdf:\tforce constant multiplier ksdf_multiplier (default = 1.2)" << std::endl;
 	std::cout << "\t-kc:\tcorner force constant multiplier kc_multiplier (default = 0.75)" << std::endl;
 	std::cout << "\t-vm:\tvertex mass VERTEX_MASS (default = 1.0)" << std::endl;
@@ -1235,8 +1162,8 @@ int main(int argc, char *argv[])
 				FILENAME = argv[++i];
 			if (flag == "-id")
 				IDENTIFIER = argv[++i];
-			if (flag == "-t1")
-				T1 = std::atof(argv[++i]);
+			if (flag == "-td")
+				Td = std::atof(argv[++i]);
 			if (flag == "-ks")
 				K_S = std::atof(argv[++i]);
 			if (flag == "-kd")
@@ -1258,8 +1185,8 @@ int main(int argc, char *argv[])
 	}
 
 	// redefine dependent parameters
-	K_SDF = ksdf_multiplier * K_S * T1;
-	K_C = kc_multiplier * K_S * T1 / edge_length_factor;
+	K_SDF = ksdf_multiplier * K_S * Td;
+	K_C = kc_multiplier * K_S * Td / edge_length_factor;
 	MASS_INV = 1.0 / VERTEX_MASS;
 	STEPS = (size_t)std::ceil(TOTAL_TIME / TIME_STEP);
 	max_change_vec.set_size(STEPS);
@@ -1276,11 +1203,11 @@ int main(int argc, char *argv[])
 
 	// resampling to ensure almost uniform edge lengths
 	std::cout << "Starting resampling..." << std::endl;
-	Pwh pwh = resample(slice.front(), T1 / edge_length_factor);
+	Pwh pwh = resample(slice.front(), Td / edge_length_factor);
 	std::cout << "Resampling done!" << std::endl;
 
-	// define a regular polygon structing element approximating a circle of radius T1
-	Polygon structElem = getStructuringElement(T1 / 2, SE_sides);
+	// define a regular polygon structing element approximating a circle of radius Td
+	Polygon structElem = getStructuringElement(Td / 2, SE_sides);
 
 	// populate memos - compute and store normals, angles, sdf, forces, and Jacobians
 	std::cout << "Populating memos..." << std::endl;
@@ -1300,12 +1227,12 @@ int main(int argc, char *argv[])
 		std::cout << "Performing numerical integration..." << std::endl;
 		for (size_t i = 0; i < STEPS; i++)
 		{
-			std::cout << "Time step: " << i+1 << " ..." << std::endl;
+			//std::cout << "Time step: " << i+1 << " ..." << std::endl;
 			max_change_vec[i] = march_and_update(nMove, pwh, FORCE, JPOS, JVEL, VELOCITY);
-			std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
-			outfile << write(pwh);
-			outfile.close();
-			std::cout << "Max change = " << max_change_vec[i] << std::endl;
+			//std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
+			//outfile << write(pwh);
+			//outfile.close();
+			//std::cout << "Max change = " << max_change_vec[i] << std::endl;
 		}
 		std::cout << "Integration completed!" << std::endl;
 		std::cout << std::endl;

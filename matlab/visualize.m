@@ -2,14 +2,14 @@ clear all
 close all
 clc
 
-% inputFile = '../data/example/example';
+inputFile = '../data/example/example';
 % inputFile = '../data/cactus_z0/cactus_z0';
 % inputFile = '../data/karambit/karambit_2_1';
-inputFile = '../data/sample/sample';
+% inputFile = '../data/sample/sample';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
-outputIdentifier = '0002';
+outputIdentifier = 'test';
 filename = [inputFile, '_', outputIdentifier];
 
 pwh_list = readPWHList([filename, '.dat']);
