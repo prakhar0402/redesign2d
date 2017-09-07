@@ -2,11 +2,14 @@ clear all
 close all
 clc
 
-inputFile = '../data/example/example';
+% inputFile = '../data/example/example';
+% inputFile = '../data/cactus_z0/cactus_z0';
+% inputFile = '../data/karambit/karambit_2_1';
+inputFile = '../data/sample/sample';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
-outputIdentifier = '0005';
+outputIdentifier = '0002';
 filename = [inputFile, '_', outputIdentifier];
 
 pwh_list = readPWHList([filename, '.dat']);
@@ -64,7 +67,7 @@ box on
 
 saveas(gcf, [filename, '.jpg'])
 
-% T1 = 0.08;
+% T1 = 6.2;
 
 remain_frac = sum(sdf < T1)/nV;
 fprintf('Fraction of remaining vertices below threshold diameter = %f\n', remain_frac);
@@ -89,7 +92,7 @@ figure
 hold on
 plotPWHList(pwh_list)
 
-normal_length = 0.2;
+normal_length = 0.05;
 count = 0;
 for i = 1 : size(pwh_list.pwh{1}.outer_boundary, 1);
     

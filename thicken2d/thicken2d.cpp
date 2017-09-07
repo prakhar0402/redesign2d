@@ -58,7 +58,7 @@ std::string FILENAME = "../data/example/example.dat";
 std::string IDENTIFIER = "test"; // use it to uniquely name each run of the code for result file generation
 
 // SDF parameters
-size_t num_samples = 10;
+size_t num_samples = 12;
 double cone_half_angle = CGAL_PI / 12.0;
 std::uniform_real_distribution<double> unif(-cone_half_angle, cone_half_angle);
 std::default_random_engine re;
@@ -1204,13 +1204,13 @@ void print_usage()
 	std::cout << "\tthicken2d.exe" << " <flag1> <value1> <flag2> <value2> ..." << std::endl;
 	std::cout << std::endl;
 	std::cout << "FLAGS:" << std::endl;
-	std::cout << "\t-f:\tinput file path FILENAME (default = \"data\\cactus\\cactus.off\")" << std::endl;
+	std::cout << "\t-f:\tinput file path FILENAME (default = \"..\\data\\example\\example.dat\")" << std::endl;
 	std::cout << "\t-id:\texperiment index IDENTIFIER (default = \"test\")" << std::endl;
-	std::cout << "\t-t1:\tthreshold T1 (default = 0.1)" << std::endl;
-	std::cout << "\t-ks:\tspring constant K_S (default = 128.0)" << std::endl;
-	std::cout << "\t-kd:\tdamper constant K_D (default = 64.0)" << std::endl;
-	std::cout << "\t-ksdf:\tforce constant multiplier K_SDF (default = 8.0)" << std::endl;
-	std::cout << "\t-kc:\tcorner force constant multiplier K_C (default = 8.0)" << std::endl;
+	std::cout << "\t-t1:\tthreshold T1 (default = 0.4)" << std::endl;
+	std::cout << "\t-ks:\tspring constant K_S (default = 64.0)" << std::endl;
+	std::cout << "\t-kd:\tdamper constant K_D (default = 128.0)" << std::endl;
+	std::cout << "\t-ksdf:\tforce constant multiplier ksdf_multiplier (default = 1.2)" << std::endl;
+	std::cout << "\t-kc:\tcorner force constant multiplier kc_multiplier (default = 0.75)" << std::endl;
 	std::cout << "\t-vm:\tvertex mass VERTEX_MASS (default = 1.0)" << std::endl;
 	std::cout << "\t-ts:\tone time step TIME_STEP (default = 1.0)" << std::endl;
 	std::cout << "\t-t:\ttotal time TOTAL_TIME (default = 50.0)" << std::endl;
@@ -1302,9 +1302,9 @@ int main(int argc, char *argv[])
 		{
 			std::cout << "Time step: " << i+1 << " ..." << std::endl;
 			max_change_vec[i] = march_and_update(nMove, pwh, FORCE, JPOS, JVEL, VELOCITY);
-			//std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
-			//outfile << write(pwh);
-			//outfile.close();
+			std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
+			outfile << write(pwh);
+			outfile.close();
 			std::cout << "Max change = " << max_change_vec[i] << std::endl;
 		}
 		std::cout << "Integration completed!" << std::endl;

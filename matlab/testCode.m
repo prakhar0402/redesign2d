@@ -10,22 +10,27 @@ normal_length = 0.5;
 angles = dlmread('../data/angles.dat')*180/pi;
 %%%%
 inputFile = '../data/example/example';
+inputFile = '../data/cactus_z0/cactus_z0';
+% inputFile = '../data/karambit/karambit_2_1';
+inputFile = '../data/sample/sample';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
-outputIdentifier = 'v007';
+outputIdentifier = '0003';
 filename = [inputFile, '_', outputIdentifier];
 
 figure
 hold on
-for i = 1 : 31
-    pause(2)
+for i = 1 : 100
+    pause(.2)
     cla
     pwh_list = readPWHList([filename, '.dat_', num2str(i)]);
     plotPWHList(pwh_list)
     axis equal
     title(i)
 end
+pwh_list = readPWHList([inputFile, '.dat']);
+plotPWHList(pwh_list)
 
 %%%%
 count = 0;
