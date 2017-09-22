@@ -86,7 +86,7 @@ double VertexMemo::compute_length()
 //		//sdf_force = K_sdf*area*CGAL::square(threshold_dia - sdf);
 //}
 
-void VertexMemo::compute_force(const double& K_sdf, const double& K_s, const double& K_d, const double& threshold_dia)
+void VertexMemo::compute_force(const double& K_sdf, const double& K_s, const double& K_d)
 {
 	if (isMovable)
 	{

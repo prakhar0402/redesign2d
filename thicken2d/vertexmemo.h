@@ -33,7 +33,7 @@ public:
 	size_t loc; // location in vector of all vertices
 	size_t index; // global matrix index for movable vertice
 	bool isMovable;
-	void compute_force(const double& K_sdf, const double& K_s, const double& K_d, const double& threshold_dia);
+	void compute_force(const double& K_sdf, const double& K_s, const double& K_d);
 	arma::vec get_force();
 	arma::mat get_Jacobian_pos();
 	arma::mat get_Jacobian_vel();

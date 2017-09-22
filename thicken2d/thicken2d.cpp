@@ -76,8 +76,11 @@ double VERTEX_MASS = 1.0;
 double MASS_INV = 1.0 / VERTEX_MASS;
 
 double TIME_STEP = 1.0;
-double TOTAL_TIME = 50.0;
+double TOTAL_TIME = 100.0;
 size_t STEPS = (size_t)std::ceil(TOTAL_TIME / TIME_STEP);
+
+size_t N_BATCH = 4; // number of times SDF and spring-damper system is reset during iterations (including initial)
+size_t BATCH_SIZE = (size_t)std::ceil((double)STEPS / N_BATCH);
 
 size_t SE_sides = 12; // sides in approximated structuring element - dodecagon
 double alpha = 2 * CGAL_PI / SE_sides; // angle projected by each SE side at center
@@ -591,6 +594,7 @@ void setSDFNeighbor(
 			idx = startIdx + (idx - startIdx) % pg.size();
 		vmemo_vec[idx].isMovable = true;
 		vmemo_vec[idx].setMaxSDFMag(force / std::exp(std::abs(i))); // exponentially decaying force in both directions
+		//vmemo_vec[idx].setMaxSDFMag(force / std::pow(1.2, std::abs(i)));
 		//vmemo_vec[idx].setMaxMag(force / std::pow(1.5, std::abs(i)));
 		//vmemo_vec[idx].setMaxMag(force / (std::abs(i) + 1));
 	}
@@ -665,7 +669,7 @@ size_t populate_memos(
 	size_t movable = 0; // number of movable vertices
 	for (std::vector<VertexMemo>::iterator it = vmemo_vec.begin(); it != vmemo_vec.end(); it++)
 	{
-		it->compute_force(K_SDF, K_S, K_D, Td);
+		it->compute_force(K_SDF, K_S, K_D);
 		if (it->isMovable)
 			it->index = ++movable;
 		else
@@ -856,7 +860,7 @@ void update(
 	for (size_t i = 0; i < vmemo_vec.size(); i++)
 	{
 		vmemo_vec[i].set_normal(normal_vec[i]);
-		vmemo_vec[i].compute_force(K_SDF, K_S, K_D, Td);
+		vmemo_vec[i].compute_force(K_SDF, K_S, K_D);
 		ememo_vec[i].compute_force(K_S, K_D);
 	}
 }
@@ -1027,10 +1031,6 @@ Pwh_list open(const Pwh& pwh, const Polygon& structElem)
 
 	CGAL::join(temp.begin(), temp.end(), std::back_inserter(opened));
 
-	std::ofstream outfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_open.dat");
-	outfile << write(opened);
-	outfile.close();
-
 	return opened;
 }
 
@@ -1040,10 +1040,6 @@ Pwh_list close(const Pwh& pwh, const Polygon& structElem)
 	// dilate and then erode
 	Pwh dilated = dilate(pwh, structElem);
 	Pwh_list closed = erode(dilated, structElem);
-
-	std::ofstream outfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_close.dat");
-	outfile << write(closed);
-	outfile.close();
 
 	return closed;
 }
@@ -1058,10 +1054,6 @@ Pwh_list open(const Pwh_list& pwh_list, const Polygon& structElem)
 
 	CGAL::join(temp.begin(), temp.end(), std::back_inserter(opened));
 
-	std::ofstream outfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_open.dat");
-	outfile << write(opened);
-	outfile.close();
-
 	return opened;
 }
 
@@ -1075,17 +1067,85 @@ Pwh_list close(const Pwh_list& pwh_list, const Polygon& structElem)
 
 	CGAL::join(temp.begin(), temp.end(), std::back_inserter(closed));
 
-	std::ofstream outfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_close.dat");
-	outfile << write(closed);
-	outfile.close();
-
 	return closed;
+}
+
+// compute printability metric
+double printability(Pwh pwh, Polygon structElem)
+{
+	populate_memos(pwh, false);
+
+	double a_thin = 0.0, a_cnvx = 0.0, a_cncv = 0.0, a_hole = 0.0, a_slice = 0.0;
+	
+	a_slice = CGAL::to_double(pwh.outer_boundary().area());
+	for (Pwh::Hole_const_iterator hi = pwh.holes_begin(); hi != pwh.holes_end(); hi++)
+		a_slice += CGAL::to_double(hi->area());
+
+	double thin_sdf = 0.0, all_sdf = 0.0;
+	for (size_t i = 0; i < sdf_vec.size(); i++)
+	{
+		if (sdf_vec[i] <= Td)
+			thin_sdf += sdf_vec[i];
+		all_sdf += sdf_vec[i];
+
+		if (interior_angles[i] < lower_lim)
+			a_cnvx += (1.0 / tan(interior_angles[i] / 2.0) + interior_angles[i] / 2.0 - CGAL_PI / 2.0)* Td*Td / 4; // convex
+		// concave corner area taken care in a_hole
+		//if (interior_angles[i] > upper_lim)
+		//	a_cncv += -(1.0 / tan(interior_angles[i] / 2.0) + interior_angles[i] / 2.0 - CGAL_PI / 2.0)* Td*Td / 4; // concave
+	}
+	a_thin = thin_sdf*a_slice / all_sdf;
+
+	Pwh_list R = subtract(close(pwh, structElem), pwh);
+
+	for (Pwh_list::const_iterator pi = R.begin(); pi != R.end(); pi++)
+	{
+		a_hole += CGAL::to_double(pi->outer_boundary().area());
+		for (Pwh::Hole_const_iterator hi = pi->holes_begin(); hi != pi->holes_end(); hi++)
+			a_hole += CGAL::to_double(hi->area());
+	}
+
+	double pm = 1.0 - ((a_thin + a_cnvx + a_hole) / (a_slice + a_hole));
+
+	return pm;
+}
+
+// compute and write thins and holes using morphological operations
+void thins_holes(Pwh pwh, Polygon structElem, std::string fname)
+{
+	// closing and opening operation on slice
+	Pwh_list opened = open(pwh, structElem);
+	Pwh_list closed = close(pwh, structElem);
+
+	std::ofstream ofile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_" + fname + "_open.dat");
+	ofile << write(opened);
+	ofile.close();
+
+	std::ofstream cfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_" + fname + "_close.dat");
+	cfile << write(closed);
+	cfile.close();
+
+	// computing the thin regions in slice
+	Pwh_list temp;
+	temp.push_back(pwh);
+	Pwh_list P = subtract(temp, opened.front()); // using only the first element of opened
+	std::ofstream Poutfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_" + fname + "_thin.dat");
+	Poutfile << write(P);
+	Poutfile.close();
+
+	// computing the small holes in slice
+	Pwh_list R = subtract(closed, pwh);
+	std::ofstream Routfile(FILENAME.substr(0, FILENAME.size() - 4) + "_" + IDENTIFIER + "_" + fname + "_hole.dat");
+	Routfile << write(R);
+	Routfile.close();
 }
 
 // creates an output file with all the necessary parameters and output values
 void generateOutput(
 	const std::string filename,
-	const Pwh& pwh
+	const Pwh& pwh,
+	double init_rho,
+	double sdfix_rho
 )
 {
 	std::ofstream ofile(filename);
@@ -1119,6 +1179,10 @@ void generateOutput(
 		ofile << *it << "\n";
 	ofile << "Max Change:\n";
 	ofile << max_change_vec;
+	ofile << "Initial printability index:\n";
+	ofile << init_rho;
+	ofile << "SDFix printability index:\n";
+	ofile << sdfix_rho;
 	ofile.close();
 }
 
@@ -1140,7 +1204,8 @@ void print_usage()
 	std::cout << "\t-kc:\tcorner force constant multiplier kc_multiplier (default = 0.75)" << std::endl;
 	std::cout << "\t-vm:\tvertex mass VERTEX_MASS (default = 1.0)" << std::endl;
 	std::cout << "\t-ts:\tone time step TIME_STEP (default = 1.0)" << std::endl;
-	std::cout << "\t-t:\ttotal time TOTAL_TIME (default = 50.0)" << std::endl;
+	std::cout << "\t-t:\ttotal time TOTAL_TIME (default = 100.0)" << std::endl;
+	std::cout << "\t-nb:\tnumber of batches N_BATCH (default = 4)" << std::endl;
 	std::cout << "\t-h, -help:\tprint usage" << std::endl;
 	std::cout << std::endl;
 	std::cout << "Running using default settings..." << std::endl;
@@ -1178,6 +1243,8 @@ int main(int argc, char *argv[])
 				TIME_STEP = std::atof(argv[++i]);
 			if (flag == "-t")
 				TOTAL_TIME = std::atof(argv[++i]);
+			if (flag == "-nb")
+				N_BATCH = (size_t)std::atoi(argv[++i]);
 			if (flag == "-h" || flag == "-help")
 				print_usage();
 			++i;
@@ -1189,6 +1256,7 @@ int main(int argc, char *argv[])
 	K_C = kc_multiplier * K_S * Td / edge_length_factor;
 	MASS_INV = 1.0 / VERTEX_MASS;
 	STEPS = (size_t)std::ceil(TOTAL_TIME / TIME_STEP);
+	BATCH_SIZE = (size_t)std::ceil((double)STEPS / N_BATCH);
 	max_change_vec.set_size(STEPS);
 
 	// output filenames
@@ -1205,9 +1273,48 @@ int main(int argc, char *argv[])
 	std::cout << "Starting resampling..." << std::endl;
 	Pwh pwh = resample(slice.front(), Td / edge_length_factor);
 	std::cout << "Resampling done!" << std::endl;
+	std::cout << std::endl;
 
 	// define a regular polygon structing element approximating a circle of radius Td
 	Polygon structElem = getStructuringElement(Td / 2, SE_sides);
+
+	double init_rho = printability(pwh, structElem);
+	std::cout << "Initial Printability = " << init_rho << std::endl;
+	std::cout << std::endl;
+
+	thins_holes(pwh, structElem, "original");
+
+	arma::vec FORCE;
+	arma::sp_mat JPOS;
+	arma::sp_mat JVEL;
+	arma::vec VELOCITY;
+		
+	// numerical time integration
+	max_change_vec.fill(0.0);
+	std::cout << "Performing numerical integration..." << std::endl;
+	std::cout << std::endl;
+	for (size_t i = 0; i < STEPS; i++)
+	{
+		if (i % BATCH_SIZE == 0)
+		{
+			std::cout << "Step: " << i << ", Time: " << i*TIME_STEP << std::endl;
+			// populate memos - compute and store normals, angles, sdf, forces, and Jacobians
+			std::cout << "Populating memos..." << std::endl;
+			nMove = populate_memos(pwh, false); // nMove is the number of movable vertices
+			std::cout << "Populating completed!\nNumber of movable vertices = " << nMove << std::endl;
+			std::cout << std::endl;
+
+			if (nMove == 0) break;
+		}
+		//std::cout << "Time step: " << i << " ..." << std::endl;
+		max_change_vec[i] = march_and_update(nMove, pwh, FORCE, JPOS, JVEL, VELOCITY);
+		//std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
+		//outfile << write(pwh);
+		//outfile.close();
+		//std::cout << "Max change = " << max_change_vec[i] << std::endl;
+	}
+	std::cout << "Integration completed!" << std::endl;
+	std::cout << std::endl;
 
 	// populate memos - compute and store normals, angles, sdf, forces, and Jacobians
 	std::cout << "Populating memos..." << std::endl;
@@ -1215,45 +1322,29 @@ int main(int argc, char *argv[])
 	std::cout << "Populating completed!\nNumber of movable vertices = " << nMove << std::endl;
 	std::cout << std::endl;
 
-	if (STEPS > 0 && nMove > 0)
-	{
-		arma::vec FORCE;
-		arma::sp_mat JPOS;
-		arma::sp_mat JVEL;
-		arma::vec VELOCITY;
-		
-		// numerical time integration
-		max_change_vec.fill(0.0);
-		std::cout << "Performing numerical integration..." << std::endl;
-		for (size_t i = 0; i < STEPS; i++)
-		{
-			//std::cout << "Time step: " << i+1 << " ..." << std::endl;
-			max_change_vec[i] = march_and_update(nMove, pwh, FORCE, JPOS, JVEL, VELOCITY);
-			//std::ofstream outfile(pwhOutFile + "_" + std::to_string(i+1));
-			//outfile << write(pwh);
-			//outfile.close();
-			//std::cout << "Max change = " << max_change_vec[i] << std::endl;
-		}
-		std::cout << "Integration completed!" << std::endl;
-		std::cout << std::endl;
-
-		// populate memos - compute and store normals, angles, sdf, forces, and Jacobians
-		std::cout << "Populating memos..." << std::endl;
-		nMove = populate_memos(pwh, false); // nMove is the number of movable vertices
-		std::cout << "Populating completed!\nNumber of movable vertices = " << nMove << std::endl;
-		std::cout << std::endl;
-	}
-
 	// write output Pwh into a file
 	std::ofstream outfile(pwhOutFile);
 	outfile << write(pwh);
 	outfile.close();
 
+	double sdfix_rho = printability(pwh, structElem);
+	std::cout << "SDFix Printability = " << sdfix_rho << std::endl;
+	std::cout << std::endl;
+
+	thins_holes(pwh, structElem, "sdfix");
+
 	// write other output values and parameters into a result file
-	generateOutput(outputFile, pwh);
-	
-	// closing and opening operation
-	close(open(pwh, structElem), structElem);
+	generateOutput(outputFile, pwh, init_rho, sdfix_rho);
+
+	// closing and opening operation on final slice
+	// Pwh_list opened = open(pwh, structElem);
+	Pwh_list closed = close(pwh, structElem);
+
+	double final_rho = printability(closed.front(), structElem); // using only first element of closed
+	std::cout << "Final Printability = " << final_rho << std::endl;
+	std::cout << std::endl;
+
+	thins_holes(closed.front(), structElem, "final"); // using only first element of closed
 
 	return 0;
 }

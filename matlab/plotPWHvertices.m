@@ -7,7 +7,7 @@ if nargin < 2
     end
 end
 
-plot(pwh.outer_boundary(:, 1), pwh.outer_boundary(:, 2), 'o',  'MarkerEdgeColor', color, 'MarkerSize', size);
+plot(pwh.outer_boundary(:, 1), pwh.outer_boundary(:, 2), 'o',  'MarkerEdgeColor', color, 'MarkerFaceColor', color, 'MarkerSize', size);
 for i = 1 : pwh.num_holes
-    plot(pwh.holes{i}(:, 1), pwh.holes{i}(:, 2), 'o',  'MarkerEdgeColor', color, 'MarkerSize', size);
+    plot(pwh.holes{i}(:, 1), pwh.holes{i}(:, 2), 'o',  'MarkerEdgeColor', color, 'MarkerFaceColor', color, 'MarkerSize', size);
 end

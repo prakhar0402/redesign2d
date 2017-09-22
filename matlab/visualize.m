@@ -2,13 +2,17 @@ clear all
 close all
 clc
 
-inputFile = '../data/example/example';
+% inputFile = '../data/example/example';
 % inputFile = '../data/cactus_z0/cactus_z0';
 % inputFile = '../data/karambit/karambit_2_1';
 % inputFile = '../data/sample/sample';
+% inputFile = '../data/case4/case4';
+% inputFile = '../data/sample2/sample2';
+inputFile = '../data/ex4/ex4';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
+% outputIdentifier = '0000';
 outputIdentifier = 'test';
 filename = [inputFile, '_', outputIdentifier];
 
@@ -53,10 +57,15 @@ line = fgetl(fid);
 interiorAngles = fscanf(fid, '%f\n', nV);
 line = fgetl(fid);
 max_change = fscanf(fid, '%f\n', STEPS);
+line = fgetl(fid);
+init_rho = fscanf(fid, '%f\n', 1);
+line = fgetl(fid);
+sdfix_rho = fscanf(fid, '%f\n', 1);
 
 fclose(fid);
 
 figure
+subplot(2, 2, 1)
 hold on
 plotPWHwithCdata(pwh_list.pwh{1}, sdf)
 colorbar
@@ -65,14 +74,14 @@ xlabel({['SDF: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
 set(gca, 'XTick', '', 'YTick', '')
 box on
 
-saveas(gcf, [filename, '.jpg'])
+% saveas(gca, [filename, '.jpg'])
 
 % T1 = 6.2;
 
 remain_frac = sum(sdf < T1)/nV;
 fprintf('Fraction of remaining vertices below threshold diameter = %f\n', remain_frac);
 
-figure
+subplot(2, 2, 2)
 plotPWHwithCdata(pwh_list.pwh{1}, 1*(sdf < T1) + 0*(movable_index > 0))
 colorbar
 axis equal
@@ -81,14 +90,10 @@ set(gca, 'XTick', '', 'YTick', '')
 box on
 hold on
 
-figure
-plot(TIME_STEP:TIME_STEP:TIME_STEP*STEPS, max_change)
-xlabel('Time (in secs)');
-ylabel('Maxima of Change in Vertex Location')
 
 
 % plotting normals
-figure
+subplot(2, 2, 3)
 hold on
 plotPWHList(pwh_list)
 
@@ -118,26 +123,41 @@ set(gca, 'XTick', '', 'YTick', '')
 box on
 hold on
 
-
-figure
+subplot(2, 2, 4)
 plotPWHwithCdata(pwh_list.pwh{1}, interiorAngles*180/pi)
 colorbar
 axis equal
-xlabel({['Thin: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
+xlabel({['Angles: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
 set(gca, 'XTick', '', 'YTick', '')
 box on
 hold on
 
+%% Convergence plot
+figure
+plot(TIME_STEP:TIME_STEP:TIME_STEP*STEPS, max_change)
+xlabel('Time (in secs)');
+ylabel('Maxima of Change in Vertex Location')
+
+%% Open and Close Plot
 open_pwh_list = readPWHList([filename, '_open.dat']);
 
 figure
+subplot(1, 2, 1)
 hold on
 plotPWHList(open_pwh_list)
 axis equal
+xlabel({['Open: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
+set(gca, 'XTick', '', 'YTick', '')
+box on
+hold on
 
 close_pwh_list = readPWHList([filename, '_close.dat']);
 
-figure
+subplot(1, 2, 2)
 hold on
 plotPWHList(close_pwh_list)
 axis equal
+xlabel({['Close: ', inputFile], outputIdentifier}, 'fontweight', 'bold')
+set(gca, 'XTick', '', 'YTick', '')
+box on
+hold on

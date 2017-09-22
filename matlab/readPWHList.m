@@ -1,5 +1,15 @@
 function pwh_list = readPWHList(filename)
 
+% PWH List MAT Data Structure
+% num_poly: Number of pwhs
+% pwh: cell array containing pwhs
+% pwh{i}
+%       num_holes: number of holes in pwh
+%       holes: cell array containing holes
+%       outer_boundary: Nx2 array of vertices
+%       holes{j}
+%               Mx2 array of vertices
+
 fid = fopen(filename);
 pwh_list.num_poly = fscanf(fid, '%d', 1);
 pwh_list.pwh = cell(pwh_list.num_poly, 1);
