@@ -1,9 +1,14 @@
 clear all
 close all
 clc
-inputFile = '../data/example/example';
+inputFile = '../data/comb/comb';
 
-% pwh_list = readPWHList([inputFile, '.dat']);
+pwh_list = readPWHList([inputFile, '.dat']);
+
+figure
+hold on
+plotPWHList(pwh_list)
+axis equal
 
 outputIdentifier = '0003';
 filename = [inputFile, '_', outputIdentifier];

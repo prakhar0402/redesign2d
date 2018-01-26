@@ -8,7 +8,8 @@ clc
 % inputFile = '../data/sample/sample';
 % inputFile = '../data/case4/case4';
 % inputFile = '../data/sample2/sample2';
-inputFile = '../data/ex4/ex4';
+% inputFile = '../data/ex4/ex4';
+inputFile = '../data/comb/comb';
 
 % pwh_list = readPWHList([inputFile, '.dat']);
 
