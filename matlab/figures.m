@@ -264,9 +264,11 @@ set(gcf,'Color',[1, 1, 1]);
 
 % Convergence plot
 figure
-plot(TIME_STEP:TIME_STEP:TIME_STEP*STEPS, max_change, 'LineWidth', 2)
-xlabel('Time Steps', 'FontWeight', 'bold', 'FontSize', 20);
-ylabel({'Maxima of','Vertex Displacements'}, 'FontWeight', 'bold', 'FontSize', 20)
+plot(TIME_STEP:TIME_STEP:TIME_STEP*STEPS, max_change, 'LineWidth', 4)
+set(gca, 'xtick', 0:25:100)
+set(gca, 'FontSize', 20)
+xlabel('Time Steps', 'FontWeight', 'bold', 'FontSize', 24);
+ylabel({'Maxima of','Vertex Displacements'}, 'FontWeight', 'bold', 'FontSize', 24)
 axis square
 
 %% Final slice
